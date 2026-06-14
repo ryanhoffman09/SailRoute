@@ -265,7 +265,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
 /* visual tweaks */
 
 .leaflet-container {
-	background: #ddd;
+	background: #e9e9e7;
 	outline-offset: 1px;
 	}
 .leaflet-container a {
@@ -700,7 +700,7 @@ svg.leaflet-image-layer.leaflet-interactive path {
     background: var(--panel); border-right: 1px solid var(--line);
     padding: 16px; display: flex; flex-direction: column; gap: 14px;
   }
-  #map { flex: 1; height: 100vh; background: #0a141f; }
+  #map { flex: 1; height: 100vh; background: #e9e9e7; }
   h1 { font-size: 20px; letter-spacing: 0.5px; }
   h1 .logo { color: var(--accent); }
   .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
@@ -744,9 +744,21 @@ svg.leaflet-image-layer.leaflet-interactive path {
   input[type="range"] { width: 100%; accent-color: var(--accent); }
   #timeLabel { font-size: 12px; color: var(--accent-2); text-align: center; margin-top: 4px; }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .windlegend { display: flex; gap: 4px; align-items: center; font-size: 10px; color: var(--muted); margin-top: 6px; flex-wrap: wrap; }
-  .windlegend span { display: inline-flex; align-items: center; gap: 3px; }
-  .windlegend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .windscale { margin-top: 8px; }
+  .windscale-bar {
+    height: 12px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.15);
+    background: linear-gradient(to right,
+      rgb(160,200,255) 0%,
+      rgb(96,165,250)  11%,
+      rgb(52,211,153)  20%,
+      rgb(163,230,53)  29%,
+      rgb(251,191,36)  38%,
+      rgb(251,146,60)  49%,
+      rgb(248,113,113) 62%,
+      rgb(190,18,60)   80%,
+      rgb(120,0,80)    100%);
+  }
+  .windscale-ticks { display: flex; justify-content: space-between; font-size: 9px; color: var(--muted); margin-top: 2px; }
   .leaflet-container { font: inherit; }
   .footer { font-size: 10.5px; color: var(--muted); line-height: 1.5; margin-top: auto; }
   label.chk { display: flex; align-items: center; gap: 7px; margin: 5px 0; font-size: 12.5px; color: var(--text); cursor: pointer; }
@@ -843,12 +855,11 @@ svg.leaflet-image-layer.leaflet-interactive path {
     <h2>Wind Forecast Viewer</h2>
     <input type="range" id="timeSlider" min="0" max="0" value="0" step="1">
     <div id="timeLabel">–</div>
-    <div class="windlegend">
-      <span><i style="background:#60a5fa"></i>&lt;8 kn</span>
-      <span><i style="background:#34d399"></i>8–14</span>
-      <span><i style="background:#fbbf24"></i>14–20</span>
-      <span><i style="background:#fb923c"></i>20–27</span>
-      <span><i style="background:#f87171"></i>&gt;27 kn</span>
+    <div class="windscale">
+      <div class="windscale-bar"></div>
+      <div class="windscale-ticks">
+        <span>0</span><span>10</span><span>20</span><span>30</span><span>40</span><span>50+ kn</span>
+      </div>
     </div>
   </div>
 
@@ -1215,8 +1226,21 @@ function setStatus(msg, cls) { statusEl.textContent = msg; statusEl.className = 
 
 // Default view: Lake Michigan
 const map = L.map("map", { zoomControl: true }).setView([43.6, -86.9], 7);
-const baseTiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  maxZoom: 18, attribution: "&copy; OpenStreetMap"
+
+// Windy-style layer stack (bottom → top):
+//   dark base (no labels) → wind color → labels/route → white wind streaks
+// Custom panes let the color sit UNDER the labels & route so they stay readable.
+map.createPane("heatPane");
+map.getPane("heatPane").style.zIndex = 230;          // just above the base tiles (200)
+map.getPane("heatPane").style.pointerEvents = "none";
+map.createPane("labelPane");
+map.getPane("labelPane").style.zIndex = 350;          // above the wind color, below routes (400)
+map.getPane("labelPane").style.pointerEvents = "none";
+
+// Light gray base map with NO labels — clean and easy to read.
+const baseTiles = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png", {
+  subdomains: "abcd", maxZoom: 19,
+  attribution: "&copy; OpenStreetMap, &copy; CARTO"
 }).addTo(map);
 let tileErrWarned = false;
 baseTiles.on("tileerror", () => {
@@ -1224,8 +1248,13 @@ baseTiles.on("tileerror", () => {
   tileErrWarned = true;
   setStatus("Map tiles failed to load — this app needs internet access. If you are viewing this in a preview pane, open the file in a web browser instead.", "err");
 });
+// Place names + borders, drawn ON TOP of the wind color so they're always legible.
+L.tileLayer("https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png", {
+  subdomains: "abcd", maxZoom: 19, pane: "labelPane"
+}).addTo(map);
+// Nautical seamarks, also above the color.
 L.tileLayer("https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png", {
-  maxZoom: 18, opacity: 0.85, attribution: "&copy; OpenSeaMap"
+  maxZoom: 18, opacity: 0.9, pane: "labelPane", attribution: "&copy; OpenSeaMap"
 }).addTo(map);
 
 const routeLayer = L.layerGroup().addTo(map);
@@ -1308,6 +1337,7 @@ $("clearBtn").onclick = () => {
   for (const m of [startMarker, finishMarker]) if (m) map.removeLayer(m);
   startMarker = finishMarker = null;
   routeLayer.clearLayers(); isoLayer.clearLayers(); windLayer.clearLayers();
+  stopParticles();
   $("resultCard").style.display = "none";
   $("windCard").style.display = "none";
   windField = null;
@@ -1323,27 +1353,239 @@ function windColor(kn) {
   return "#f87171";
 }
 
-function drawWind(unixSec) {
-  windLayer.clearLayers();
-  if (!windField) return;
-  const skip = Math.max(1, Math.ceil(windField.lats.length / 9));
-  for (let iy = 0; iy < windField.lats.length; iy += skip) {
-    for (let ix = 0; ix < windField.lons.length; ix += skip) {
-      const w = windField.sample(windField.lats[iy], windField.lons[ix], unixSec);
-      if (!w) continue;
-      const col = windColor(w.tws);
-      const toDir = (w.twd + 180) % 360;
-      const len = 0.5 + Math.min(w.tws, 30) / 30 * 0.5;
-      const html = `<div style="transform:rotate(${toDir}deg) scale(${len});
-        transform-origin:center;width:30px;height:30px;line-height:30px;
-        text-align:center;font-size:22px;color:${col};
-        text-shadow:0 0 3px rgba(0,0,0,.8)" title="${w.tws.toFixed(0)} kn">↑</div>`;
-      L.marker([windField.lats[iy], windField.lons[ix]], {
-        icon: L.divIcon({ className: "", html, iconSize: [30, 30], iconAnchor: [15, 15] }),
-        interactive: false, keyboard: false
-      }).addTo(windLayer);
+/* ================================================================
+   PARTICLE WIND ANIMATION  (windy.com-style canvas streamlines)
+   ================================================================ */
+const PARTICLE_COUNT = 2500;
+const MAX_AGE        = 90;   // frames before a particle respawns
+const FADE_ALPHA     = 0.93; // trail persistence (lower = shorter trails)
+// D2R already defined earlier in this script
+
+let pCanvas = null, pCtx = null;
+let hCanvas = null, hCtx = null;   // wind-speed heatmap (Windy-style color background)
+let pParticles = [];
+let pAnimId   = null;
+let pWindTime = null; // current unix timestamp shown
+
+function windColorRgba(kn, a) {
+  // Smooth rgba version for canvas drawing
+  if (kn <  4) return `rgba(147,197,253,${a})`;
+  if (kn <  8) return `rgba(96,165,250,${a})`;
+  if (kn < 12) return `rgba(52,211,153,${a})`;
+  if (kn < 17) return `rgba(163,230,53,${a})`;
+  if (kn < 22) return `rgba(251,191,36,${a})`;
+  if (kn < 28) return `rgba(251,146,60,${a})`;
+  if (kn < 35) return `rgba(248,113,113,${a})`;
+  return `rgba(220,38,38,${a})`;
+}
+
+// Continuous color ramp for the heatmap background (smoothly interpolated)
+const WIND_STOPS = [
+  [0,   [160, 200, 255]],  // calm  - pale blue
+  [6,   [ 96, 165, 250]],  // light - blue
+  [11,  [ 52, 211, 153]],  // green
+  [16,  [163, 230,  53]],  // lime
+  [21,  [251, 191,  36]],  // amber
+  [27,  [251, 146,  60]],  // orange
+  [34,  [248, 113, 113]],  // red
+  [44,  [190,  18,  60]],  // crimson
+  [55,  [120,   0,  80]],  // deep magenta (storm)
+];
+function windHeatColor(kn) {
+  const S = WIND_STOPS;
+  if (kn <= S[0][0]) return S[0][1];
+  if (kn >= S[S.length - 1][0]) return S[S.length - 1][1];
+  for (let i = 1; i < S.length; i++) {
+    if (kn <= S[i][0]) {
+      const [k0, c0] = S[i - 1], [k1, c1] = S[i];
+      const t = (kn - k0) / (k1 - k0);
+      return [
+        Math.round(c0[0] + (c1[0] - c0[0]) * t),
+        Math.round(c0[1] + (c1[1] - c0[1]) * t),
+        Math.round(c0[2] + (c1[2] - c0[2]) * t),
+      ];
     }
   }
+  return S[S.length - 1][1];
+}
+
+const HEAT_ALPHA = 0.42;   // light tint so the gray base map reads through the color
+const HEAT_CELL  = 14;     // sample spacing in px (smaller = sharper, slower)
+
+function hInitCanvas() {
+  if (hCanvas) return;
+  hCanvas = document.createElement("canvas");
+  hCanvas.style.cssText = "position:absolute;top:0;left:0;pointer-events:none;";
+  // Live in the dedicated map pane so labels and routes render above the color.
+  map.getPane("heatPane").appendChild(hCanvas);
+  hCtx = hCanvas.getContext("2d");
+
+  // Geo-anchored: repaint after the map settles or resizes.
+  map.on("moveend zoomend resize", () => drawHeatmap(pWindTime));
+}
+
+function drawHeatmap(unixSec) {
+  if (!hCtx) return;
+  // Anchor the canvas to the current view and size it to the viewport.
+  const size = map.getSize(), W = size.x, H = size.y;
+  L.DomUtil.setPosition(hCanvas, map.containerPointToLayerPoint([0, 0]));
+  if (hCanvas.width !== W)  hCanvas.width  = W;
+  if (hCanvas.height !== H) hCanvas.height = H;
+  hCtx.clearRect(0, 0, W, H);
+  if (!windField || unixSec == null) return;
+
+  const cols = Math.max(2, Math.ceil(W / HEAT_CELL)) + 1;
+  const rows = Math.max(2, Math.ceil(H / HEAT_CELL)) + 1;
+
+  // Render into a tiny offscreen buffer, then scale it up with smoothing
+  // so the color field looks continuous (Windy-style) rather than blocky.
+  const off = document.createElement("canvas");
+  off.width = cols; off.height = rows;
+  const octx = off.getContext("2d");
+  const img = octx.createImageData(cols, rows);
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const px = (c / (cols - 1)) * W;
+      const py = (r / (rows - 1)) * H;
+      const ll = map.containerPointToLatLng([px, py]);
+      const w = windField.sample(ll.lat, ll.lng, unixSec);
+      const o = (r * cols + c) * 4;
+      if (!w) { img.data[o + 3] = 0; continue; }
+      const [cr, cg, cb] = windHeatColor(w.tws);
+      img.data[o]     = cr;
+      img.data[o + 1] = cg;
+      img.data[o + 2] = cb;
+      img.data[o + 3] = 255;
+    }
+  }
+  octx.putImageData(img, 0, 0);
+
+  hCtx.globalAlpha = HEAT_ALPHA;
+  hCtx.imageSmoothingEnabled = true;
+  hCtx.imageSmoothingQuality = "high";
+  hCtx.drawImage(off, 0, 0, cols, rows, 0, 0, W, H);
+  hCtx.globalAlpha = 1;
+}
+
+function pMakeParticle() {
+  const b = map.getBounds();
+  return {
+    lat: b.getSouth() + Math.random() * (b.getNorth() - b.getSouth()),
+    lon: b.getWest()  + Math.random() * (b.getEast()  - b.getWest()),
+    age: Math.floor(Math.random() * MAX_AGE),
+    maxAge: MAX_AGE + Math.floor(Math.random() * 40)
+  };
+}
+
+function pInitCanvas() {
+  if (pCanvas) return;
+  const container = map.getContainer();
+  pCanvas = document.createElement("canvas");
+  pCanvas.style.cssText =
+    "position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:450;";
+  container.appendChild(pCanvas);
+  pCtx = pCanvas.getContext("2d");
+
+  function resize() {
+    const r = container.getBoundingClientRect();
+    pCanvas.width  = r.width;
+    pCanvas.height = r.height;
+  }
+  resize();
+  new ResizeObserver(resize).observe(container);
+
+  // On pan/zoom, age-out all particles so they respawn in the new view
+  map.on("movestart zoomstart", () => pParticles.forEach(p => { p.age = p.maxAge; }));
+}
+
+function pAnimate() {
+  pAnimId = requestAnimationFrame(pAnimate);
+  if (!windField || pWindTime === null || !pCtx) return;
+
+  const W = pCanvas.width, H = pCanvas.height;
+  const bounds = map.getBounds();
+  const latSpan = bounds.getNorth() - bounds.getSouth();
+  const lonSpan = bounds.getEast()  - bounds.getWest();
+
+  // Fade existing trails by compositing a semi-opaque clear
+  pCtx.globalCompositeOperation = "destination-in";
+  pCtx.globalAlpha = FADE_ALPHA;
+  pCtx.fillStyle = "rgba(0,0,0,1)";
+  pCtx.fillRect(0, 0, W, H);
+  pCtx.globalCompositeOperation = "source-over";
+  pCtx.globalAlpha = 1;
+
+  pCtx.lineWidth = 1.5;
+
+  for (let i = 0; i < pParticles.length; i++) {
+    const p = pParticles[i];
+    p.age++;
+
+    // Respawn if old or outside visible area (with margin)
+    const outLat = p.lat < bounds.getSouth() - latSpan * 0.15 ||
+                   p.lat > bounds.getNorth() + latSpan * 0.15;
+    const outLon = p.lon < bounds.getWest()  - lonSpan * 0.15 ||
+                   p.lon > bounds.getEast()  + lonSpan * 0.15;
+    if (p.age >= p.maxAge || outLat || outLon) {
+      pParticles[i] = pMakeParticle();
+      continue;
+    }
+
+    const w = windField.sample(p.lat, p.lon, pWindTime);
+    if (!w || w.tws < 0.3) { pParticles[i] = pMakeParticle(); continue; }
+
+    // Move in pixel space for zoom-independent visual speed
+    const pt0 = map.latLngToContainerPoint([p.lat, p.lon]);
+    const toDir = (w.twd + 180) % 360; // direction wind is blowing TOWARD
+    const speedPx = Math.min(w.tws, 40) * 0.22; // px per frame
+    const dx = Math.sin(toDir * D2R) * speedPx;
+    const dy = -Math.cos(toDir * D2R) * speedPx; // canvas y increases downward
+    const pt1 = { x: pt0.x + dx, y: pt0.y + dy };
+
+    // Convert new pixel back to geo for next frame
+    const newLatLng = map.containerPointToLatLng([pt1.x, pt1.y]);
+    p.lat = newLatLng.lat;
+    p.lon = newLatLng.lng;
+
+    // Fade in/out over lifetime
+    const life = p.age / p.maxAge;
+    const alpha = life < 0.1 ? life * 10 : life > 0.8 ? (1 - life) / 0.2 : 1;
+
+    pCtx.globalAlpha = alpha * 0.6;
+    pCtx.strokeStyle = "rgba(30,41,59,0.85)";     // dark slate streaks read clearly on the light map
+    pCtx.shadowColor  = "rgba(255,255,255,0.55)";  // faint white halo for legibility over darker tints
+    pCtx.shadowBlur   = 1.5;
+    pCtx.beginPath();
+    pCtx.moveTo(pt0.x, pt0.y);
+    pCtx.lineTo(pt1.x, pt1.y);
+    pCtx.stroke();
+  }
+
+  pCtx.globalAlpha = 1;
+  pCtx.shadowBlur  = 0;
+}
+
+function startParticles(unixSec) {
+  pWindTime = unixSec;
+  pInitCanvas();
+  if (!pAnimId) {
+    pParticles = Array.from({ length: PARTICLE_COUNT }, pMakeParticle);
+    pAnimate();
+  }
+}
+
+function stopParticles() {
+  if (pAnimId) { cancelAnimationFrame(pAnimId); pAnimId = null; }
+  if (pCtx) pCtx.clearRect(0, 0, pCanvas.width, pCanvas.height);
+}
+
+function drawWind(unixSec) {
+  windLayer.clearLayers(); // keep layer for future hover-info use
+  if (!windField) { stopParticles(); if (hCtx) hCtx.clearRect(0, 0, hCanvas.width, hCanvas.height); return; }
+  hInitCanvas();
+  drawHeatmap(unixSec);
+  startParticles(unixSec);
 }
 
 function setupSlider() {
@@ -1359,7 +1601,7 @@ function setupSlider() {
     });
     drawWind(t);
   };
-  sl.oninput = upd;
+  sl.oninput = () => { upd(); if (pAnimId) pWindTime = windField.times[+sl.value]; };
   $("windCard").style.display = "";
   upd();
 }
@@ -1389,7 +1631,9 @@ function renderResults(results, order, s) {
   for (const m of [...ok].reverse()) {
     const res = results[m], col = MODELS[m].color, isF = m === fastest;
     const pts = [[s.lat, s.lng], ...res.legs.map(l => [l.lat, l.lon])];
-    L.polyline(pts, { color: "#0b1220", weight: isF ? 7 : 5, opacity: 0.55 }).addTo(routeLayer);
+    // white halo + dark casing so the route reads clearly over any wind color
+    L.polyline(pts, { color: "#ffffff", weight: isF ? 10 : 7, opacity: 0.9 }).addTo(routeLayer);
+    L.polyline(pts, { color: "#0b1220", weight: isF ? 7 : 5, opacity: 0.9 }).addTo(routeLayer);
     if (isF) {
       // per-leg segments with detailed tooltips for the fastest route
       for (let i = 0; i < res.legs.length; i++) {
